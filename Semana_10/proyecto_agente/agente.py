@@ -1,7 +1,7 @@
 """agente.py · El agente de Marketing Analytics en un archivo de Python.
 
 Es el mismo agente del notebook (el taller), listo para que la app de Streamlit (app.py) lo use.
-Cómo completarlo: reemplacen cada función que tiene espacios COMPLETAR por su versión terminada del notebook.
+Incluye las seis herramientas nuevas completadas y respaldo automático de Gemini.
 Para revisar que quedó bien, corran el Paso 10.2 del notebook.
 """
 
@@ -18,20 +18,16 @@ try:
     API_KEY = userdata.get("GEMINI_API_KEY")
 except ImportError:                            # VS Code: llave en el archivo .env
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
     API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=API_KEY)
 
-# Elegir un modelo "flash-lite" disponible en su cuenta
-excluir = ("tts", "image", "live", "audio", "embedding", "preview", "exp")
-modelos = []
-for m in client.models.list():
-    nombre = m.name.replace("models/", "")
-    if "generateContent" in (m.supported_actions or []) and "gemini" in nombre:
-        if not any(x in nombre for x in excluir):
-            modelos.append(nombre)
-lite = sorted(m for m in modelos if "flash-lite" in m)
-MODELO = lite[-1] if lite else sorted(modelos)[-1]
+# Modelo principal y alternativas configuradas en el notebook.
+MODELO = "gemini-3.1-flash-lite"
+MODELOS_RESPALDO = [
+    "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash",
+    "gemini-3.8-flash", "gemini-3.5-flash-lite"
+]
 print("Modelo:", MODELO)
 
 D_MENSUAL = 0.008    # tasa de descuento mensual del curso (0.8%)
@@ -183,7 +179,7 @@ def valor_campana_retencion(clientes_contactados: int, uplift: float,
             "costo_total": round(costo_total, 2), "beneficio_neto": round(beneficio, 2),
             "conviene": beneficio > 0, "uplift_minimo_para_no_perder": round(costo_por_contacto / clv, 4)}
 
-# ============================================================ 4. Herramientas nuevas (REEMPLACEN las que tienen COMPLETAR por las suyas)
+# ============================================================ 4. Herramientas nuevas
 
 def relacion_clv_cac(clv: float, cac: float, margen_mensual: float) -> dict:
     """Compara el CLV (valor de vida del cliente) con el CAC (Customer Acquisition Cost,
@@ -192,10 +188,10 @@ def relacion_clv_cac(clv: float, cac: float, margen_mensual: float) -> dict:
     margen_mensual: margen por cliente al mes (US$).
     Regla del curso: CLV/CAC de 3 o más es sano."""
     # Baranda: los tres datos tienen que ser positivos
-    if COMPLETAR:                                     # pista: clv <= 0 or cac <= 0 or margen_mensual <= 0
+    if clv <= 0 or cac <= 0 or margen_mensual <= 0:                                     # pista: clv <= 0 or cac <= 0 or margen_mensual <= 0
         return {"error": "CLV, CAC y margen mensual deben ser mayores que 0."}
-    razon = COMPLETAR                                 # pista: clv ÷ cac
-    meses = COMPLETAR                                 # pista: cac ÷ margen_mensual
+    razon = clv / cac                                 # pista: clv ÷ cac
+    meses = cac / margen_mensual                                 # pista: cac ÷ margen_mensual
     if razon >= 3:
         lectura = "sano (3 o más)"
     elif razon >= 1:
@@ -221,7 +217,7 @@ def estimar_elasticidad(segmento: str = "", fuente: str = "precios") -> dict:
             return {"error": f"La fuente '{fuente}' no tiene columna de segmento."}
         disponibles = sorted(df["segmento"].astype(str).unique())
         df = df[df["segmento"].astype(str).str.lower() == segmento.lower()]
-        if COMPLETAR:                                 # pista: df.empty  (no quedó ningún renglón)
+        if df.empty:                                 # pista: df.empty  (no quedó ningún renglón)
             return {"error": f"No existe el segmento '{segmento}'. Segmentos disponibles: {disponibles}"}
 
     # 3. Baranda: precios y unidades positivos, y al menos 3 precios distintos
@@ -230,7 +226,7 @@ def estimar_elasticidad(segmento: str = "", fuente: str = "precios") -> dict:
         return {"error": "Se necesitan pruebas con al menos 3 precios distintos para estimar la elasticidad."}
 
     # 4. La pendiente de ln(unidades) contra ln(precio) es la elasticidad
-    eps = float(np.polyfit(COMPLETAR, COMPLETAR, 1)[0])    # pista: np.log(df["precio"]), np.log(df["unidades"])
+    eps = float(np.polyfit(np.log(df["precio"]), np.log(df["unidades"]), 1)[0])    # pista: np.log(df["precio"]), np.log(df["unidades"])
 
     if eps < -1:
         lectura = "elástica: las ventas reaccionan más que el precio"
@@ -251,18 +247,20 @@ def proponer_precio(precio_actual: float, costo: float, elasticidad: float, unid
     # Barandas de datos
     if p <= 0 or C <= 0 or Q <= 0:
         return {"error": "Precio, costo y unidades deben ser mayores que 0."}
-    if COMPLETAR:                                     # pista: e >= 0  (la elasticidad debe ser negativa)
+    if e >= 0:                                     # pista: e >= 0  (la elasticidad debe ser negativa)
         return {"error": "La elasticidad debe ser negativa (si sube el precio, se vende menos). Revisa el signo."}
+    if 1.2 * C > p * 1.10:
+        return {"error": "El precio mínimo por costo supera el tope de incremento del 10%."}
     # Precio óptimo (solo existe si la demanda es elástica, ε < −1)
     if e < -1:
-        p_optimo = COMPLETAR                          # pista: C × e ÷ (1 + e)
+        p_optimo = C * e / (1 + e)                          # pista: C × e ÷ (1 + e)
     else:
         p_optimo = None
     # Reglas de la empresa
     propuesto = p * 1.10 if p_optimo is None else p_optimo
-    propuesto = min(propuesto, COMPLETAR)             # pista: tope de subir máximo 10% → p × 1.10
+    propuesto = min(propuesto, p * 1.10)             # pista: tope de subir máximo 10% → p × 1.10
     propuesto = max(propuesto, p * 0.90)        # tope: bajar máximo 10%
-    propuesto = max(propuesto, COMPLETAR)             # pista: margen mínimo → 1.2 × C
+    propuesto = max(propuesto, 1.2 * C)             # pista: margen mínimo → 1.2 × C
     cambio = propuesto / p - 1
 
     def utilidad(precio):
@@ -271,7 +269,7 @@ def proponer_precio(precio_actual: float, costo: float, elasticidad: float, unid
     return {"precio_optimo": round(p_optimo, 2) if p_optimo else "no hay óptimo: con ε entre -1 y 0 conviene subir hasta el tope",
             "precio_propuesto": round(propuesto, 2), "cambio_pct": round(cambio * 100, 1),
             "utilidad_mensual_hoy": round(utilidad(p)), "utilidad_mensual_propuesta": round(utilidad(propuesto)),
-            "requiere_aprobacion_humana": COMPLETAR}  # pista: abs(cambio) > 0.05
+            "requiere_aprobacion_humana": abs(cambio) > 0.05 + 1e-12}  # pista: abs(cambio) > 0.05
 
 def metricas_regla_asociacion(producto_a: str, producto_b: str, fuente: str = "tickets") -> dict:
     """Soporte, confianza y lift de la regla A → B (Apriori, venta cruzada), calculados con los
@@ -302,9 +300,9 @@ def metricas_regla_asociacion(producto_a: str, producto_b: str, fuente: str = "t
     # 4. Las tres fórmulas
     soporte_a = con_a.sum() / n
     soporte_b = con_b.sum() / n
-    soporte_ab = COMPLETAR                            # pista: (con_a & con_b).sum() ÷ n
-    confianza = COMPLETAR                             # pista: soporte_ab ÷ soporte_a
-    lift = COMPLETAR                                  # pista: confianza ÷ soporte_b
+    soporte_ab = (con_a & con_b).sum() / n                            # pista: (con_a & con_b).sum() ÷ n
+    confianza = soporte_ab / soporte_a                             # pista: soporte_ab ÷ soporte_a
+    lift = confianza / soporte_b                                  # pista: confianza ÷ soporte_b
     return {"tickets": int(n), "soporte_a": round(float(soporte_a), 4), "soporte_b": round(float(soporte_b), 4),
             "soporte_ab": round(float(soporte_ab), 4), "confianza": round(float(confianza), 4), "lift": round(float(lift), 2),
             "lectura": "vale la pena recomendar B a quien compra A" if lift > 1 else "no se compran juntos más de lo normal"}
@@ -323,7 +321,7 @@ def segmentar_clientes(k: int, fuente: str = "clientes") -> dict:
         return {"error": str(e)}
 
     # 2. Barandas: k razonable y al menos 2 variables
-    if COMPLETAR:                                     # pista: k < 2 or k > 6
+    if k < 2 or k > 6:                                     # pista: k < 2 or k > 6
         return {"error": "k debe estar entre 2 y 6 segmentos."}
     variables = FUENTES[fuente].get("variables", [])
     if len(variables) < 2:
@@ -332,7 +330,7 @@ def segmentar_clientes(k: int, fuente: str = "clientes") -> dict:
     # 3. Estandarizar (misma escala para todas) y correr k-means
     datos = df[variables].dropna()
     X = StandardScaler().fit_transform(datos)
-    etiquetas = KMeans(n_clusters=int(k), n_init=10, random_state=0).fit_predict(COMPLETAR)   # pista: X
+    etiquetas = KMeans(n_clusters=int(k), n_init=10, random_state=0).fit_predict(X)   # pista: X
     datos = datos.assign(segmento=etiquetas)
 
     # 4. Resumen por segmento
@@ -374,7 +372,7 @@ def buscar_apunte(tema: str) -> dict:
     for ruta in archivos:
         texto = open(ruta, encoding="utf-8").read()
         for parrafo in re.split(r"\n\s*\n", texto):             # un párrafo = un pedazo (chunk)
-            puntos = sum(_sin_acentos(parrafo).count(p) for p in COMPLETAR)   # pista: palabras
+            puntos = sum(_sin_acentos(parrafo).count(p) for p in palabras)   # pista: palabras
             if puntos > 0:
                 resultados.append((puntos, os.path.basename(ruta), parrafo.strip()[:600]))
 
@@ -382,7 +380,7 @@ def buscar_apunte(tema: str) -> dict:
     if not resultados:
         return {"aviso": "No encontré nada sobre ese tema en los apuntes.", "archivos": [os.path.basename(a) for a in archivos]}
     resultados.sort(reverse=True)
-    return {"resultados": [{"archivo": a, "texto": t} for _, a, t in resultados[:COMPLETAR]]}   # pista: 3
+    return {"resultados": [{"archivo": a, "texto": t} for _, a, t in resultados[:3]]}   # pista: 3
 
 # ============================================================ 5. El agente
 
@@ -404,16 +402,27 @@ INSTRUCCIONES = """Eres un tutor experto en Marketing Analytics para estudiantes
 
 
 def llamar_gemini(contenido, config=None):
-    """Llama a Gemini. Si nos pasamos del límite gratuito (error 429), espera 40 segundos y reintenta."""
-    for intento in range(4):
+    """Usa un modelo alternativo ante errores temporales o de disponibilidad."""
+    global MODELO
+    modelos = list(dict.fromkeys([MODELO] + MODELOS_RESPALDO))
+    ultimo_error = None
+    for modelo in modelos:
         try:
-            return client.models.generate_content(model=MODELO, contents=contenido, config=config)
-        except errors.ClientError as e:
-            if e.code == 429 and intento < 3:
-                print("Límite de Gemini (15 llamadas por minuto). Espero 40 segundos...")
-                time.sleep(40)
-            else:
-                raise
+            respuesta = client.models.generate_content(
+                model=modelo, contents=contenido, config=config
+            )
+            if MODELO != modelo:
+                print(f"Modelo cambiado a: {modelo}")
+                MODELO = modelo
+            return respuesta
+        except errors.APIError as e:
+            ultimo_error = e
+            if e.code in (404, 429, 500, 502, 503, 504):
+                print(f"{modelo}: Error {e.code}. Probando otro modelo...")
+                time.sleep(2)
+                continue
+            raise
+    raise ultimo_error
 
 
 def preguntar(pregunta, historial=None, max_pasos=8, mostrar=True, herramientas=None):
